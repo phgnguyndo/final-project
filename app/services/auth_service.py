@@ -34,7 +34,8 @@ class AuthService:
             if not bcrypt.checkpw(password.encode('utf-8'), stored_password):
                 raise ValueError("Invalid username or password")
             
-            token = create_access_token(identity=user.id)
+            # Convert user.id to string for JWT identity
+            token = create_access_token(identity=str(user.id))
             self.logger.info(f"User logged in: {username}")
             return token
         except Exception as e:
