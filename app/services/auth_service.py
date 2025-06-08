@@ -15,7 +15,7 @@ class AuthService:
                 raise ValueError("Username already exists")
             
             hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-            user = self.user_repository.create_user(username, hashed_password, full_name)
+            user = self.user_repository.create_user(username, hashed_password.decode('utf-8'), full_name)
             self.logger.info(f"User registered: {username}")
             return user
         except Exception as e:
@@ -26,7 +26,12 @@ class AuthService:
         """Service: Authenticate user and return JWT token"""
         try:
             user = self.user_repository.get_user_by_username(username)
-            if not user or not bcrypt.checkpw(password.encode('utf-8'), user.password):
+            if not user:
+                raise ValueError("Invalid username or password")
+            
+            # Decode stored password from database (stored as string) to bytes
+            stored_password = user.password.encode('utf-8')
+            if not bcrypt.checkpw(password.encode('utf-8'), stored_password):
                 raise ValueError("Invalid username or password")
             
             token = create_access_token(identity=user.id)
