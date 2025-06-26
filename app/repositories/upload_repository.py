@@ -4,12 +4,10 @@ import uuid
 from ..config.settings import Config
 
 class UploadRepository:
-    def save_file(self, file, filename):
-        upload_dir = Config.UPLOAD_DIR
+    def save_file(self, file, filename, upload_dir):
         if not os.path.exists(upload_dir):
             os.makedirs(upload_dir)
         
-        # Generate unique filename to avoid conflicts
         unique_filename = f"{uuid.uuid4().hex}_{filename}"
         file_path = os.path.join(upload_dir, unique_filename)
         

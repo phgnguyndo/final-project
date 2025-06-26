@@ -13,6 +13,7 @@ jwt = JWTManager()
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+    app.config['MAX_CONTENT_LENGTH'] = Config.MAX_UPLOAD_SIZE
     
     # Initialize extensions
     db.init_app(app)
