@@ -5,6 +5,7 @@ from flask_jwt_extended import JWTManager
 from .config.settings import Config
 from .utils.logger import setup_logger
 from .utils.exceptions import handle_api_error
+from .api.resources.upload import UploadPcap
 
 db = SQLAlchemy()
 jwt = JWTManager()
@@ -31,7 +32,7 @@ def create_app():
     from .api.resources.info import ModelInfo
     from .api.resources.auth import Register, Login, CurrentUser, CurrentUserFullName
     
-    api.add_resource(HealthCheck, '/api/health')
+    api.add_resource(HealthCheck, '/')
     api.add_resource(ModelLoad, '/api/model/load')
     api.add_resource(ModelPredict, '/api/predict')
     api.add_resource(ModelInfo, '/api/model/info')
@@ -40,6 +41,7 @@ def create_app():
     api.add_resource(Login, '/api/auth/login')
     api.add_resource(CurrentUser, '/api/auth/me')
     api.add_resource(CurrentUserFullName, '/api/auth/fullname')
+    api.add_resource(UploadPcap, '/api/upload/pcap')
     
     # Initialize database
     with app.app_context():

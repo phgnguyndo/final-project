@@ -5,4 +5,5 @@ __pycache__/
 logs/
 models/*.pkl
 venv/
+uploads/
 *.sql

@@ -23,3 +23,6 @@ class Config:
     SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key')
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-jwt-secret-key')
     DEBUG = os.getenv('FLASK_DEBUG', 'True') == 'True'
+
+    UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
+    MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE", 10 * 1024 * 1024))  # 10MB

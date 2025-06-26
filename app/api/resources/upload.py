@@ -1,0 +1,24 @@
+# app/api/resources/upload.py
+from flask_restful import Resource, request
+from flask_jwt_extended import jwt_required
+from ...services.upload_service import UploadService
+from werkzeug.utils import secure_filename
+
+class UploadPcap(Resource):
+    @jwt_required()
+    def post(self):
+        if 'file' not in request.files:
+            return {"error": "No file provided"}, 400
+        
+        file = request.files['file']
+        filename = secure_filename(file.filename)
+        
+        if not filename.lower().endswith(('.pcap', '.pcapng')):
+            return {"error": "Invalid file format. Only .pcap or .pcapng allowed"}, 400
+        
+        try:
+            service = UploadService()
+            saved_path = service.save_pcap(file, filename)
+            return {"message": f"File {filename} uploaded successfully", "path": saved_path}, 200
+        except Exception as e:
+            return {"error": str(e)}, 500
