@@ -6,4 +6,5 @@ logs/
 models/*.pkl
 venv/
 uploads/
+csv_outputs/
 *.sql
