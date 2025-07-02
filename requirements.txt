@@ -1,4 +1,3 @@
-# requirements.txt
 Flask==2.2.5
 Flask-RESTful==0.3.10
 Flask-SQLAlchemy==3.0.5
@@ -10,4 +9,5 @@ pymysql==1.1.0
 bcrypt==4.0.1
 cryptography==42.0.7
 werkzeug==2.3.8
-cicflowmeter==0.1.6
+cicflowmeter==0.4.2
+requests

@@ -3,6 +3,7 @@ from flask_restful import Resource, request
 from flask_jwt_extended import jwt_required
 from ...services.upload_service import UploadService
 from werkzeug.utils import secure_filename
+import os
 
 class UploadPcap(Resource):
     @jwt_required()
@@ -18,7 +19,11 @@ class UploadPcap(Resource):
         
         try:
             service = UploadService()
-            saved_path = service.save_pcap(file, filename)
-            return {"message": f"File {filename} uploaded successfully", "path": saved_path}, 200
+            result = service.process_pcap(file, filename)
+            return {
+                "message": f"File {filename} uploaded and converted successfully",
+                "pcap_path": result["pcap_path"],
+                "csv_path": result["csv_path"]
+            }, 200
         except Exception as e:
             return {"error": str(e)}, 500

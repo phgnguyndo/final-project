@@ -26,3 +26,4 @@ class Config:
 
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
     MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE", 10 * 1024 * 1024))  # 10MB
+    CSV_OUTPUT_DIR = os.getenv("CSV_OUTPUT_DIR", "csv_outputs")
