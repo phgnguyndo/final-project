@@ -25,7 +25,7 @@ class UploadPcap(Resource):
                 "csv_path": result["csv_path"],
                 "prediction": result["prediction"],
                 "mse_threshold": result["mse_threshold"],
-                # "mse_values": result["mse_values"],
+                "mse_values": result["mse_values"],
                 "normal_percentage": result["normal_percentage"],
                 "abnormal_percentage": result["abnormal_percentage"],
                 "max_mse": result["max_mse"],
