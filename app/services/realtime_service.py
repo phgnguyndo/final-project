@@ -254,7 +254,7 @@ class RealtimeService:
         features['flow_iat_mean'] = np.mean(flow['iat_values']) if flow['iat_values'] and len(flow['iat_values']) > 1 else 0
         features['flow_iat_max'] = max(flow['iat_values']) if flow['iat_values'] else 0
         
-        # Directional IAT features
+        # Directional IAT features (simplified)
         features['fwd_iat_tot'] = sum(flow['fwd_iat_values']) if flow['fwd_iat_values'] else 0
         features['fwd_iat_max'] = max(flow['fwd_iat_values']) if flow['fwd_iat_values'] else 0
         
@@ -277,8 +277,8 @@ class RealtimeService:
             # Calculate threshold (you may need to adjust this)
             threshold = 0.001  # Adjust based on your model's performance
             
-            is_anomaly = mse[0] > threshold
-            max_mse = float(mse[0])
+            is_anomaly = bool(mse[0] > threshold)  # Convert numpy.bool_ to Python bool
+            max_mse = float(mse[0])  # Ensure float for JSON serialization
             
             # Store in history
             current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -302,7 +302,7 @@ class RealtimeService:
                 'tot_fwd_pkts': flow_features['tot_fwd_pkts'],
                 'tot_bwd_pkts': flow_features['tot_bwd_pkts'],
                 'max_mse': max_mse,
-                'is_anomaly': is_anomaly,
+                'is_anomaly': is_anomaly,  # Now a Python bool
                 'status': 'Anomaly Detected' if is_anomaly else 'Normal',
                 'flow_pkts_s_history': [h['flow_pkts_s'] for h in self.history_buffer],
                 'flow_byts_s_history': [h['flow_byts_s'] for h in self.history_buffer]
