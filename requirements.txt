@@ -16,3 +16,4 @@ scikit-learn==1.5.1
 numpy==1.26.4
 pandas==2.2.2
 flask-cors
+flask-socketio==5.3.6
