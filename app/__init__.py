@@ -3,6 +3,7 @@ from flask_restful import Api
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager
 from .config.settings import Config
+from flask_cors import CORS  # Thêm CORS
 from .utils.logger import setup_logger
 from .utils.exceptions import handle_api_error
 from .api.resources.upload import UploadPcap
@@ -14,7 +15,9 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
     app.config['MAX_CONTENT_LENGTH'] = Config.MAX_UPLOAD_SIZE
-    
+
+    CORS(app, resources={r"/*": {"origins": "*"}})  # Cho phép tất cả origin
+
     # Initialize extensions
     db.init_app(app)
     jwt.init_app(app)
