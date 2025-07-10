@@ -1,9 +1,9 @@
 # .gitignore
 __pycache__/
 *.pyc
-.env
+# .env
 logs/
-models/*.pkl
+# models/*.pkl
 venv/
 uploads/
 csv_outputs/
