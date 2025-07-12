@@ -6,7 +6,7 @@ from werkzeug.utils import secure_filename
 import os
 
 class UploadPcap(Resource):
-    @jwt_required()
+    # @jwt_required()
     def post(self):
         if 'file' not in request.files:
             return {"error": "No file provided"}, 400
