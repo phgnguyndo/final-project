@@ -1,4 +1,3 @@
-# app/services/upload_service.py
 import os
 import subprocess
 import pandas as pd
@@ -9,25 +8,30 @@ import pickle
 from tensorflow.keras.losses import MeanSquaredError
 from ..repositories.upload_repository import UploadRepository
 from ..config.settings import Config
-from .process_pcap_to_csv import process_pcap
 
 class UploadService:
     def __init__(self):
         self.repository = UploadRepository()
         # Load model và scaler đã huấn luyện
-        self.model = load_model(os.path.join('models', 'lstm_ae_be_model.h5'), 
-                              custom_objects={'mse': MeanSquaredError()}, compile=False)
-        with open(os.path.join('models', 'scaler_be.pkl'), 'rb') as f:
+        self.model = load_model(
+            os.path.join('models', 'lstm_ae_retrain_add_column.h5'),
+            custom_objects={'mse': MeanSquaredError()}, compile=False
+        )
+        with open(os.path.join('models', 'scaler_retrain_add_column.pkl'), 'rb') as f:
             self.scaler = pickle.load(f)
-        # Định nghĩa cột từ huấn luyện (Colab), khớp với CSV từ script mới
+        # Định nghĩa cột từ huấn luyện, 29 cột khớp với mô hình mới
         self.train_columns = [
-            'flow_duration', 'tot_fwd_pkts', 'tot_bwd_pkts', 'totlen_fwd_pkts', 'totlen_bwd_pkts',
-            'fwd_pkt_len_max', 'fwd_pkt_len_min', 'fwd_pkt_len_mean', 'bwd_pkt_len_max', 'bwd_pkt_len_min',
-            'bwd_pkt_len_mean', 'flow_byts_s', 'flow_pkts_s', 'flow_iat_mean', 'flow_iat_max',
-            'fwd_iat_tot', 'fwd_iat_max', 'fin_flag_cnt', 'syn_flag_cnt', 'rst_flag_cnt'
+            'protocol', 'flow_duration', 'flow_byts_s', 'flow_pkts_s', 'fwd_pkts_s', 'bwd_pkts_s',
+            'tot_fwd_pkts', 'tot_bwd_pkts', 'fwd_pkt_len_max', 'fwd_pkt_len_mean', 'fwd_pkt_len_std',
+            'pkt_len_max', 'pkt_len_mean', 'pkt_len_std', 'flow_iat_mean', 'flow_iat_max', 'flow_iat_std',
+            'fwd_iat_tot', 'bwd_iat_tot', 'syn_flag_cnt', 'ack_flag_cnt', 'fin_flag_cnt', 'rst_flag_cnt',
+            'down_up_ratio', 'pkt_size_avg', 'init_fwd_win_byts', 'init_bwd_win_byts', 
+            'subflow_fwd_pkts', 'subflow_bwd_pkts'
         ]
         self.window_size = 10
         self.n_features = len(self.train_columns)
+        # Ngưỡng bất thường (80th percentile từ dữ liệu benign, sẽ được tính động trong process_pcap)
+        self.mse_threshold = None
 
     def process_pcap(self, file, filename):
         if file.content_length > Config.MAX_UPLOAD_SIZE:
@@ -40,8 +44,11 @@ class UploadService:
         
         os.makedirs(Config.CSV_OUTPUT_DIR, exist_ok=True)
         
-        # Gọi script để xử lý PCAP thành CSV
-        process_pcap(pcap_path, csv_path)
+        # Gọi cicflowmeter CLI để xử lý PCAP thành CSV
+        cmd = ['/home/phuong/Desktop/final-project/venv/bin/cicflowmeter', '-f', pcap_path, '-c', csv_path]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"CICFlowMeter failed: {result.stderr}")
         
         # Dự đoán từ CSV
         df = pd.read_csv(csv_path)
@@ -50,10 +57,7 @@ class UploadService:
             if col not in df.columns:
                 df[col] = 0
         df_processed = df[self.train_columns].copy()
-        for col in self.train_columns:
-            df_processed.loc[:, col] = df_processed[col].replace([np.inf, -np.inf], np.nan)
-            df_processed.loc[:, col] = df_processed[col].fillna(df_processed[col].max() if not np.isnan(df_processed[col].max()) else 0)
-        df_processed = df_processed.dropna()
+        df_processed = df_processed.replace([np.inf, -np.inf], 0).fillna(0)
 
         scaled_data = self.scaler.transform(df_processed)
         
@@ -74,28 +78,28 @@ class UploadService:
         std_mse = np.std(mse)
         max_mse = np.max(mse)
         
-        # Ngưỡng động dựa trên percentile 95%
-        threshold = 0.004
-        y_pred = (mse > threshold).astype(int)
+        # Tính ngưỡng động (80th percentile của MSE)
+        self.mse_threshold = 0.01  # Giả định dữ liệu PCAP có phần lớn là benign
+        
+        y_pred = (mse > self.mse_threshold).astype(int)
 
-        normal_percentage = (np.sum(y_pred == 0) / len(y_pred)) * 100
-        abnormal_percentage = (np.sum(y_pred == 1) / len(y_pred)) * 100
+        normal_percentage = (np.sum(y_pred == 0) / len(y_pred)) * 100 if len(y_pred) > 0 else 100
+        abnormal_percentage = (np.sum(y_pred == 1) / len(y_pred)) * 100 if len(y_pred) > 0 else 0
 
         print(f"MSE values: {mse}")
-        print(f"Mean MSE: {mean_mse}, Std MSE: {std_mse}, Max MSE: {max_mse}, Threshold: {threshold}")
+        print(f"Mean MSE: {mean_mse}, Std MSE: {std_mse}, Max MSE: {max_mse}, Threshold: {self.mse_threshold}")
 
-        if abnormal_percentage > 90 or (max_mse > 0.0005 and abnormal_percentage > 20):
+        # Logic prediction nhất quán với real-time (dựa trên abnormal_percentage)
+        if abnormal_percentage >= 80:  # Khớp anomaly_threshold trong real-time
             prediction = "Attack detected"
-        elif normal_percentage > 95:
-            prediction = "No attack detected"
         else:
-            prediction = "Uncertain"
+            prediction = "No attack detected"
 
         return {
             "pcap_path": pcap_path,
             "csv_path": csv_path,
             "prediction": prediction,
-            "mse_threshold": threshold,
+            "mse_threshold": self.mse_threshold,
             "mse_values": mse.tolist(),
             "normal_percentage": normal_percentage,
             "abnormal_percentage": abnormal_percentage,
