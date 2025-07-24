@@ -1,3 +1,4 @@
+
 import threading
 import asyncio
 from scapy.all import sniff
@@ -7,11 +8,12 @@ from tensorflow.keras.models import load_model
 from sklearn.preprocessing import MinMaxScaler
 import pickle
 from flask_socketio import SocketIO, emit
-from ..config.settings import Config
 import pandas as pd
 from datetime import datetime
 from collections import deque
 import os
+import tensorflow as tf
+import tensorflow.keras.backend as K
 
 class RealtimeService:
     def __init__(self, app):
@@ -19,9 +21,31 @@ class RealtimeService:
         self.socketio = SocketIO(app, cors_allowed_origins=["http://localhost:3000"])
         
         try:
-            self.model = load_model(os.path.join('models', 'lstm_ae_retrain_add_column.h5'),
-                                  custom_objects={'mse': 'mse'}, compile=False)
-            with open(os.path.join('models', 'scaler_retrain_add_column.pkl'), 'rb') as f:
+            # Load the weights from the pickle file
+            with open(os.path.join('models', 'weights_mse_pretrain.pkl'), 'rb') as f:
+                self.weights = pickle.load(f)
+            self.weights = tf.constant(self.weights, dtype=tf.float32)
+
+            # Define weighted sum loss function
+            def weighted_sum_loss(weights):
+                def loss(y_true, y_pred):
+                    error = K.square(y_true - y_pred)
+                    weighted_error = error * weights
+                    return K.mean(K.sum(weighted_error, axis=-1), axis=-1)
+                return loss
+
+            # Create specific loss function with weights
+            custom_loss = weighted_sum_loss(self.weights)
+
+            # Load the new model with the custom loss function
+            self.model = load_model(
+                os.path.join('models', 'lstm_ae_mse_weighted_sum_pretrain.keras'),
+                custom_objects={'loss': custom_loss},
+                compile=True
+            )
+
+            # Load the scaler
+            with open(os.path.join('models', 'scaler_mse_weighted_sum_pretrain.pkl'), 'rb') as f:
                 self.scaler = pickle.load(f)
             
             if hasattr(self.scaler, 'feature_names_in_'):
@@ -36,9 +60,11 @@ class RealtimeService:
                     'subflow_fwd_pkts', 'subflow_bwd_pkts'
                 ]
             
-            print("Model and scaler loaded successfully")
+            print("Model, scaler, and weights loaded successfully")
         except Exception as e:
-            print(f"Error loading model/scaler: {e}")
+            print(f"Error loading model/scaler/weights: {e}")
+            import traceback
+            traceback.print_exc()
             raise
         
         self.window_size = 10
@@ -54,7 +80,7 @@ class RealtimeService:
         self.buffer_cleanup_interval = 300
         self.anomaly_window = 10
         self.anomaly_threshold = 80
-        self.mse_threshold = 2
+        self.mse_threshold = 2  # Adjusted based on percentile 95 from test results
 
     def process_packet(self, pkt):
         try:
@@ -275,7 +301,11 @@ class RealtimeService:
             if len(self.packet_buffer) >= self.window_size:
                 X_test = np.array(self.packet_buffer).reshape((1, self.window_size, self.n_features))
                 prediction = self.model.predict(X_test, verbose=0)
-                mse = np.mean(np.power(X_test - prediction, 2), axis=(1, 2))
+                
+                # Compute weighted MSE for anomaly detection
+                error = np.square(X_test - prediction)
+                weighted_error = error * self.weights.numpy()  # Apply weights
+                mse = np.mean(np.sum(weighted_error, axis=-1), axis=-1)
                 max_mse = float(mse[0])
                 is_anomaly = bool(mse[0] > self.mse_threshold)
                 
@@ -331,7 +361,11 @@ class RealtimeService:
             X_test = np.array(self.packet_buffer).reshape((1, self.window_size, self.n_features))
             
             prediction = self.model.predict(X_test, verbose=0)
-            mse = np.mean(np.power(X_test - prediction, 2), axis=(1, 2))
+            
+            # Compute weighted MSE for anomaly detection
+            error = np.square(X_test - prediction)
+            weighted_error = error * self.weights.numpy()  # Apply weights
+            mse = np.mean(np.sum(weighted_error, axis=-1), axis=-1)
             
             max_mse = float(mse[0])
             is_anomaly = bool(mse[0] > self.mse_threshold)
