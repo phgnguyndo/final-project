@@ -12,6 +12,7 @@ import pandas as pd
 from datetime import datetime
 from collections import deque
 import os
+from ..core.database import db, Detect  # Import db và model Detect
 
 class RealtimeService:
     def __init__(self, app):
@@ -54,7 +55,12 @@ class RealtimeService:
         self.buffer_cleanup_interval = 300
         self.anomaly_window = 10
         self.anomaly_threshold = 80
-        self.mse_threshold = 2
+        self.mse_threshold = 0.6
+        self.is_attacking = False
+        self.prev_is_attacking = False  # Thêm biến để theo dõi trạng thái trước đó
+        self.last_alert_time = 0
+        self.alert_cooldown = 300
+        
 
     def process_packet(self, pkt):
         try:
@@ -328,17 +334,6 @@ class RealtimeService:
 
     def _perform_anomaly_detection(self, flow_features, flow_duration, timestamp):
         try:
-            X_test = np.array(self.packet_buffer).reshape((1, self.window_size, self.n_features))
-            
-            prediction = self.model.predict(X_test, verbose=0)
-            mse = np.mean(np.power(X_test - prediction, 2), axis=(1, 2))
-            
-            max_mse = float(mse[0])
-            is_anomaly = bool(mse[0] > self.mse_threshold)
-            
-            for entry in self.history_buffer:
-                entry['is_anomaly'] = bool(entry['max_mse'] > self.mse_threshold)
-            
             current_time = datetime.now().timestamp()
             recent_anomalies = sum(
                 1 for h in self.history_buffer 
@@ -350,52 +345,44 @@ class RealtimeService:
             )
             abnormal_percentage = (recent_anomalies / total_recent * 100) if total_recent > 0 else 0
             
-            history_entry = {
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'flow_pkts_s': flow_features['flow_pkts_s'],
-                'flow_byts_s': flow_features['flow_byts_s'],
-                'tot_fwd_pkts': flow_features['tot_fwd_pkts'],
-                'tot_bwd_pkts': flow_features['tot_bwd_pkts'],
-                'max_mse': max_mse,
-                'is_anomaly': is_anomaly
-            }
+            # Cập nhật trạng thái is_attacking
+            self.is_attacking = abnormal_percentage >= self.anomaly_threshold
+
+            # Kiểm tra chuyển đổi trạng thái để lưu vào DB
+            if self.is_attacking and (not self.prev_is_attacking or (current_time - self.last_alert_time > self.alert_cooldown)):
+                self.last_alert_time = current_time
+                
+                attack_entry = {
+                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'prediction': 'Sustained Attack Detected',
+                    'max_mse': self.history_buffer[-1]['max_mse'] if self.history_buffer else 0,
+                    'abnormal_percentage': abnormal_percentage,
+                    'duration_confirmed': self.anomaly_window,
+                    'details': f'Attack detected with {abnormal_percentage:.2f}% anomalies in {self.anomaly_window} seconds'
+                }
+                self.attack_history.append(attack_entry)
+                self.socketio.emit('alert', attack_entry)
+                
+                # Lưu vào DB chỉ khi chuyển từ bình thường sang tấn công hoặc sau cooldown
+                with self.app.app_context():
+                    new_detect = Detect(
+                        timeStamp=datetime.now(),
+                        typeAttack=attack_entry['prediction'],
+                        abNormarPercent=abnormal_percentage
+                    )
+                    db.session.add(new_detect)
+                    db.session.commit()
+                    print("Saved to Detect table")
             
-            self.history_buffer.append(history_entry)
+            # Cập nhật trạng thái trước đó
+            self.prev_is_attacking = self.is_attacking
             
-            self.socketio.emit('realtime_data', {
-                'timestamp': history_entry['timestamp'],
-                'flow_pkts_s': flow_features['flow_pkts_s'],
-                'flow_byts_s': flow_features['flow_byts_s'],
-                'tot_fwd_pkts': flow_features['tot_fwd_pkts'],
-                'tot_bwd_pkts': flow_features['tot_bwd_pkts'],
-                'max_mse': max_mse,
-                'mse_values': [h['max_mse'] for h in self.history_buffer],
-                'abnormal_percentage': abnormal_percentage,
-                'is_anomaly': is_anomaly,
-                'status': 'Anomaly Detected' if is_anomaly else 'Normal',
-                'flow_pkts_s_history': [h['flow_pkts_s'] for h in self.history_buffer],
-                'flow_byts_s_history': [h['flow_byts_s'] for h in self.history_buffer],
-                'attack_history': list(self.attack_history)
-            })
-            
-            if is_anomaly:
-                self.abnormal_history.append(history_entry)
-                if total_recent >= 3 and abnormal_percentage >= self.anomaly_threshold:
-                    attack_entry = {
-                        'timestamp': history_entry['timestamp'],
-                        'prediction': 'Sustained Attack Detected',
-                        'max_mse': max_mse,
-                        'abnormal_percentage': abnormal_percentage,
-                        'duration_confirmed': self.anomaly_window,
-                        'details': f'Attack detected with {abnormal_percentage:.2f}% anomalies in {self.anomaly_window} seconds'
-                    }
-                    self.attack_history.append(attack_entry)
-                    self.socketio.emit('alert', attack_entry)
-            else:
+            # Nếu không còn tấn công, xóa abnormal_history
+            if not self.is_attacking:
                 self.abnormal_history.clear()
-                
+            
             self._cleanup_buffer(current_time)
-                
+        
         except Exception as e:
             print(f"Error in anomaly detection: {e}")
 

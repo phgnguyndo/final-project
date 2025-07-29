@@ -6,7 +6,6 @@ from .config.settings import Config
 from flask_cors import CORS  # Thêm CORS
 from .utils.logger import setup_logger
 from .utils.exceptions import handle_api_error
-from .api.resources.upload import UploadPcap
 
 db = SQLAlchemy()
 jwt = JWTManager()
@@ -35,6 +34,8 @@ def create_app():
     from .api.resources.health import HealthCheck
     from .api.resources.info import ModelInfo
     from .api.resources.auth import Register, Login, CurrentUser, CurrentUserFullName
+    from .api.resources.upload import UploadPcap
+    from .api.resources.detect import DetectResource
     
     api.add_resource(HealthCheck, '/')
     api.add_resource(ModelLoad, '/api/model/load')
@@ -46,6 +47,7 @@ def create_app():
     api.add_resource(CurrentUser, '/api/auth/me')
     api.add_resource(CurrentUserFullName, '/api/auth/fullname')
     api.add_resource(UploadPcap, '/api/upload/pcap')
+    api.add_resource(DetectResource, '/api/detect')
     
     # Initialize database
     with app.app_context():

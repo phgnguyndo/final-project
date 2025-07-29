@@ -15,3 +15,9 @@ class PredictionLog(db.Model):
     input_data = db.Column(db.JSON, nullable=False)
     prediction = db.Column(db.JSON, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Detect(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timeStamp = db.Column(db.DateTime, nullable=False)
+    typeAttack = db.Column(db.String(255), nullable=False)
+    abNormarPercent = db.Column(db.Float, nullable=False) 
