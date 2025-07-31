@@ -15,7 +15,9 @@ class DetectResource(Resource):
         page = args['page']
         per_page = args['per_page']
 
-        pagination = Detect.query.paginate(page=page, per_page=per_page, error_out=False)
+        pagination = Detect.query.order_by(Detect.timeStamp.desc()).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
         detects = pagination.items
         total_items = pagination.total
         total_pages = ceil(total_items / per_page) if total_items > 0 and per_page > 0 else 1
