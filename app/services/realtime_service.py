@@ -20,17 +20,22 @@ class RealtimeService:
         self.socketio = SocketIO(app, cors_allowed_origins=["http://localhost:3000"])
         
         try:
-            self.model = load_model(os.path.join('models', 'lstm_ae_all_benign.h5'),
+            self.model = load_model(os.path.join('models', 'lstm_ae_add_column_all_benign.h5'),
                                   custom_objects={'mse': 'mse'}, compile=False)
-            with open(os.path.join('models', 'scaler_all_benign.pkl'), 'rb') as f:
+            with open(os.path.join('models', 'scaler_add_column_all_benign.pkl'), 'rb') as f:
                 self.scaler = pickle.load(f)
             
-            self.train_columns = [
-                'flow_duration', 'tot_fwd_pkts', 'tot_bwd_pkts', 'totlen_fwd_pkts', 'totlen_bwd_pkts',
-                'fwd_pkt_len_max', 'fwd_pkt_len_min', 'fwd_pkt_len_mean', 'bwd_pkt_len_max', 'bwd_pkt_len_min',
-                'bwd_pkt_len_mean', 'flow_byts_s', 'flow_pkts_s', 'flow_iat_mean', 'flow_iat_max',
-                'fwd_iat_tot', 'fwd_iat_max', 'fin_flag_cnt', 'syn_flag_cnt', 'rst_flag_cnt'
-            ]
+            if hasattr(self.scaler, 'feature_names_in_'):
+                self.train_columns = list(self.scaler.feature_names_in_)
+            else:
+                self.train_columns = [
+                    'protocol', 'flow_duration', 'flow_byts_s', 'flow_pkts_s', 'fwd_pkts_s', 'bwd_pkts_s',
+                    'tot_fwd_pkts', 'tot_bwd_pkts', 'fwd_pkt_len_max', 'fwd_pkt_len_mean', 'fwd_pkt_len_std',
+                    'pkt_len_max', 'pkt_len_mean', 'pkt_len_std', 'flow_iat_mean', 'flow_iat_max', 'flow_iat_std',
+                    'fwd_iat_tot', 'bwd_iat_tot', 'syn_flag_cnt', 'ack_flag_cnt', 'fin_flag_cnt', 'rst_flag_cnt',
+                    'down_up_ratio', 'pkt_size_avg', 'init_fwd_win_byts', 'init_bwd_win_byts',
+                    'subflow_fwd_pkts', 'subflow_bwd_pkts'
+                ]
             
             print("Model and scaler loaded successfully")
         except Exception as e:
@@ -128,9 +133,14 @@ class RealtimeService:
             'syn_flag_cnt': 0,
             'fin_flag_cnt': 0,
             'rst_flag_cnt': 0,
+            'ack_flag_cnt': 0,
+            'psh_flag_cnt': 0,
             'iat_values': [],
             'fwd_iat_values': [],
             'bwd_iat_values': [],
+            'init_fwd_win_byts': -1,
+            'init_bwd_win_byts': -1,
+            'direction': 'forward'
         }
 
     def _update_flow_stats(self, flow, pkt, packet_size, timestamp):
@@ -152,10 +162,18 @@ class RealtimeService:
             flow['fwd_pkts'] += 1
             flow['fwd_bytes'] += packet_size
             flow['fwd_pkt_lengths'].append(packet_size)
+            if flow['total_packets'] == 1 and pkt.haslayer(TCP):
+                tcp_layer = pkt.getlayer(TCP)
+                if tcp_layer and hasattr(tcp_layer, 'window'):
+                    flow['init_fwd_win_byts'] = tcp_layer.window
         else:
             flow['bwd_pkts'] += 1
             flow['bwd_bytes'] += packet_size
             flow['bwd_pkt_lengths'].append(packet_size)
+            if flow['total_packets'] == 1 and pkt.haslayer(TCP):
+                tcp_layer = pkt.getlayer(TCP)
+                if tcp_layer and hasattr(tcp_layer, 'window'):
+                    flow['init_bwd_win_byts'] = tcp_layer.window
         
         if pkt.haslayer(TCP):
             tcp_layer = pkt.getlayer(TCP)
@@ -167,38 +185,54 @@ class RealtimeService:
                         flow['fin_flag_cnt'] += 1
                     if tcp_layer.flags & 0x04:  # RST
                         flow['rst_flag_cnt'] += 1
+                    if tcp_layer.flags & 0x10:  # ACK
+                        flow['ack_flag_cnt'] += 1
+                    if tcp_layer.flags & 0x08:  # PSH
+                        flow['psh_flag_cnt'] += 1
                 except (AttributeError, TypeError):
                     pass
 
     def _calculate_flow_features(self, flow, flow_duration):
         features = {}
         
+        features['protocol'] = float(flow['protocol'])
         features['flow_duration'] = flow_duration
         features['tot_fwd_pkts'] = flow['fwd_pkts']
         features['tot_bwd_pkts'] = flow['bwd_pkts']
-        features['totlen_fwd_pkts'] = flow['fwd_bytes']
-        features['totlen_bwd_pkts'] = flow['bwd_bytes']
-        
-        features['fwd_pkt_len_max'] = max(flow['fwd_pkt_lengths']) if flow['fwd_pkt_lengths'] else 0
-        features['fwd_pkt_len_min'] = min(flow['fwd_pkt_lengths']) if flow['fwd_pkt_lengths'] else 0
-        features['fwd_pkt_len_mean'] = np.mean(flow['fwd_pkt_lengths']) if flow['fwd_pkt_lengths'] else 0
-        
-        features['bwd_pkt_len_max'] = max(flow['bwd_pkt_lengths']) if flow['bwd_pkt_lengths'] else 0
-        features['bwd_pkt_len_min'] = min(flow['bwd_pkt_lengths']) if flow['bwd_pkt_lengths'] else 0
-        features['bwd_pkt_len_mean'] = np.mean(flow['bwd_pkt_lengths']) if flow['bwd_pkt_lengths'] else 0
-        
         features['flow_byts_s'] = flow['total_bytes'] / flow_duration if flow_duration > 0 else 0
         features['flow_pkts_s'] = flow['total_packets'] / flow_duration if flow_duration > 0 else 0
+        features['fwd_pkts_s'] = flow['fwd_pkts'] / flow_duration if flow_duration > 0 else 0
+        features['bwd_pkts_s'] = flow['bwd_pkts'] / flow_duration if flow_duration > 0 else 0
+        
+        features['fwd_pkt_len_max'] = max(flow['fwd_pkt_lengths']) if flow['fwd_pkt_lengths'] else 0
+        features['fwd_pkt_len_mean'] = np.mean(flow['fwd_pkt_lengths']) if flow['fwd_pkt_lengths'] else 0
+        features['fwd_pkt_len_std'] = np.std(flow['fwd_pkt_lengths']) if flow['fwd_pkt_lengths'] else 0
+        
+        features['pkt_len_max'] = max(flow['all_pkt_lengths']) if flow['all_pkt_lengths'] else 0
+        features['pkt_len_mean'] = np.mean(flow['all_pkt_lengths']) if flow['all_pkt_lengths'] else 0
+        features['pkt_len_std'] = np.std(flow['all_pkt_lengths']) if flow['all_pkt_lengths'] else 0
         
         features['flow_iat_mean'] = np.mean(flow['iat_values']) if flow['iat_values'] else 0
         features['flow_iat_max'] = max(flow['iat_values']) if flow['iat_values'] else 0
+        features['flow_iat_std'] = np.std(flow['iat_values']) if flow['iat_values'] else 0
         
         features['fwd_iat_tot'] = sum(flow['fwd_iat_values']) if flow['fwd_iat_values'] else 0
-        features['fwd_iat_max'] = max(flow['fwd_iat_values']) if flow['fwd_iat_values'] else 0
+        features['bwd_iat_tot'] = sum(flow['bwd_iat_values']) if flow['bwd_iat_values'] else 0
         
-        features['fin_flag_cnt'] = flow['fin_flag_cnt']
         features['syn_flag_cnt'] = flow['syn_flag_cnt']
+        features['ack_flag_cnt'] = flow['ack_flag_cnt']
+        features['fin_flag_cnt'] = flow['fin_flag_cnt']
         features['rst_flag_cnt'] = flow['rst_flag_cnt']
+        
+        total_pkts = flow['fwd_pkts'] + flow['bwd_pkts']
+        features['down_up_ratio'] = flow['bwd_bytes'] / flow['fwd_bytes'] if flow['fwd_bytes'] > 0 else 0
+        features['pkt_size_avg'] = flow['total_bytes'] / total_pkts if total_pkts > 0 else 0
+        
+        features['init_fwd_win_byts'] = flow['init_fwd_win_byts']
+        features['init_bwd_win_byts'] = flow['init_bwd_win_byts']
+        
+        features['subflow_fwd_pkts'] = flow['fwd_pkts']
+        features['subflow_bwd_pkts'] = flow['bwd_pkts']
         
         return features
 
