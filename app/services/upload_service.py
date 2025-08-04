@@ -7,6 +7,7 @@ from sklearn.preprocessing import MinMaxScaler
 import pickle
 from tensorflow.keras.losses import MeanSquaredError
 from ..repositories.upload_repository import UploadRepository
+from ..core.database import db, UploadResult
 from ..config.settings import Config
 
 class UploadService:
@@ -85,6 +86,16 @@ class UploadService:
 
         normal_percentage = (np.sum(y_pred == 0) / len(y_pred)) * 100 if len(y_pred) > 0 else 100
         abnormal_percentage = (np.sum(y_pred == 1) / len(y_pred)) * 100 if len(y_pred) > 0 else 0
+
+        # Lưu kết quả vào bảng UploadResult
+        upload_result = UploadResult(
+            filename=filename,
+            normal_percent=normal_percentage,
+            abnormal_percent=abnormal_percentage,
+            predict="Attack" if abnormal_percentage >= 80 else "Normal"
+        )
+        db.session.add(upload_result)
+        db.session.commit()
 
         print(f"MSE values: {mse}")
         print(f"Mean MSE: {mean_mse}, Std MSE: {std_mse}, Max MSE: {max_mse}, Threshold: {self.mse_threshold}")

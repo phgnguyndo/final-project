@@ -36,6 +36,7 @@ def create_app():
     from .api.resources.auth import Register, Login, CurrentUser, CurrentUserFullName
     from .api.resources.upload import UploadPcap
     from .api.resources.detect import DetectResource
+    from .api.resources.upload_result import UploadResult
     
     api.add_resource(HealthCheck, '/')
     api.add_resource(ModelLoad, '/api/model/load')
@@ -48,6 +49,7 @@ def create_app():
     api.add_resource(CurrentUserFullName, '/api/auth/fullname')
     api.add_resource(UploadPcap, '/api/upload/pcap')
     api.add_resource(DetectResource, '/api/detect')
+    api.add_resource(UploadResult, '/api/upload/results', '/api/upload/results/<int:result_id>')
     
     # Initialize database
     with app.app_context():

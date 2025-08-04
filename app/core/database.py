@@ -20,4 +20,12 @@ class Detect(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     timeStamp = db.Column(db.DateTime, nullable=False)
     typeAttack = db.Column(db.String(255), nullable=False)
-    abNormarPercent = db.Column(db.Float, nullable=False) 
+    abNormarPercent = db.Column(db.Float, nullable=False)
+
+class UploadResult(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    filename = db.Column(db.String(255), nullable=False)
+    normal_percent = db.Column(db.Float, nullable=False)
+    abnormal_percent = db.Column(db.Float, nullable=False)
+    predict = db.Column(db.String(50), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow) 
