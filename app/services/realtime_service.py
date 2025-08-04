@@ -20,9 +20,9 @@ class RealtimeService:
         self.socketio = SocketIO(app, cors_allowed_origins=["http://localhost:3000"])
         
         try:
-            self.model = load_model(os.path.join('models', 'lstm_ae_be_model.h5'),
+            self.model = load_model(os.path.join('models', 'lstm_ae_all_benign.h5'),
                                   custom_objects={'mse': 'mse'}, compile=False)
-            with open(os.path.join('models', 'scaler_be.pkl'), 'rb') as f:
+            with open(os.path.join('models', 'scaler_all_benign.pkl'), 'rb') as f:
                 self.scaler = pickle.load(f)
             
             self.train_columns = [
