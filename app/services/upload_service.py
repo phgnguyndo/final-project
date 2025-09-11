@@ -15,7 +15,7 @@ class UploadService:
         self.repository = UploadRepository()
         # Load model và scaler đã huấn luyện
         self.model = load_model(
-            os.path.join('models', 'lstm_ae_retrain_add_column.h5'),
+            os.path.join('models', 'lstm_ae_add_column_all_benign.h5'),
             custom_objects={'mse': MeanSquaredError()}, compile=False
         )
         with open(os.path.join('models', 'scaler_retrain_add_column.pkl'), 'rb') as f:
@@ -78,9 +78,7 @@ class UploadService:
         mean_mse = np.mean(mse)
         std_mse = np.std(mse)
         max_mse = np.max(mse)
-        
-        # Tính ngưỡng động (80th percentile của MSE)
-        self.mse_threshold = 0.01  # Giả định dữ liệu PCAP có phần lớn là benign
+        self.mse_threshold = 0.006 
         
         y_pred = (mse > self.mse_threshold).astype(int)
 
