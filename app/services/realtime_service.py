@@ -12,6 +12,9 @@ import pandas as pd
 from datetime import datetime
 from collections import deque
 import os
+import tensorflow.keras.backend as K
+import tensorflow as tf
+from tensorflow.keras.saving import register_keras_serializable
 from ..core.database import db, Detect
 
 class RealtimeService:
@@ -20,9 +23,38 @@ class RealtimeService:
         self.socketio = SocketIO(app, cors_allowed_origins=["http://localhost:3000"])
         
         try:
-            self.model = load_model(os.path.join('models', 'lstm_ae_all_benign.h5'),
-                                  custom_objects={'mse': 'mse'}, compile=False)
-            with open(os.path.join('models', 'scaler_all_benign.pkl'), 'rb') as f:
+            # Load weights
+            weights_path = os.path.join('models', 'weights.pkl')
+            with open(weights_path, 'rb') as f:
+                weights_np = pickle.load(f)
+            self.weights = tf.constant(weights_np, dtype=tf.float32)
+
+            # Định nghĩa hàm loss tùy chỉnh
+            @register_keras_serializable()
+            def weighted_sum_loss(weights):
+                def loss(y_true, y_pred):
+                    error = K.square(y_true - y_pred)
+                    weighted_error = error * weights
+                    return K.mean(K.sum(weighted_error, axis=-1), axis=-1)
+                return loss
+
+            @register_keras_serializable()
+            def weighted_sum_loss_wrapper(y_true, y_pred):
+                return weighted_sum_loss(self.weights)(y_true, y_pred)
+
+            # Load model
+            custom_objects = {
+                'weighted_sum_loss_wrapper': weighted_sum_loss_wrapper,
+                'weighted_sum_loss': weighted_sum_loss(self.weights)
+            }
+            self.model = load_model(
+                os.path.join('models', 'lstm_ae_all_benign_weighted.keras'),
+                custom_objects=custom_objects,
+                compile=True
+            )
+
+            # Load scaler
+            with open(os.path.join('models', 'scaler_all_benign_weighted.pkl'), 'rb') as f:
                 self.scaler = pickle.load(f)
             
             self.train_columns = [
@@ -32,9 +64,9 @@ class RealtimeService:
                 'fwd_iat_tot', 'fwd_iat_max', 'fin_flag_cnt', 'syn_flag_cnt', 'rst_flag_cnt'
             ]
             
-            print("Model and scaler loaded successfully")
+            print("Model, scaler, and weights loaded successfully")
         except Exception as e:
-            print(f"Error loading model/scaler: {e}")
+            print(f"Error loading model/scaler/weights: {e}")
             raise
         
         self.window_size = 10
@@ -50,7 +82,7 @@ class RealtimeService:
         self.buffer_cleanup_interval = 300
         self.anomaly_window = 5
         self.anomaly_threshold = 80
-        self.mse_threshold = 0.6
+        self.mse_threshold = 0.12  # Cập nhật dựa trên code test
         self.is_attacking = False
         self.prev_is_attacking = False
         self.last_alert_time = 0
@@ -217,7 +249,8 @@ class RealtimeService:
             df = df.fillna(df.max() if not df.max().isna().all() else 0)
             
             try:
-                scaled_data = self.scaler.transform(df)
+                # Dùng df.values để transform, tránh truyền tên cột
+                scaled_data = self.scaler.transform(df.values)
                 self.packet_buffer.append(scaled_data[0])
                 
                 self._emit_realtime_data(flow_features, flow_duration, timestamp, scaled_data)
@@ -246,7 +279,10 @@ class RealtimeService:
             if len(self.packet_buffer) >= self.window_size:
                 X_test = np.array(self.packet_buffer).reshape((1, self.window_size, self.n_features))
                 prediction = self.model.predict(X_test, verbose=0)
-                mse = np.mean(np.power(X_test - prediction, 2), axis=(1, 2))
+                # Tính weighted MSE
+                error = np.square(X_test - prediction)
+                weighted_error = error * self.weights.numpy()
+                mse = np.mean(np.sum(weighted_error, axis=-1), axis=-1)
                 max_mse = float(mse[0])
                 is_anomaly = bool(mse[0] > self.mse_threshold)
                 
